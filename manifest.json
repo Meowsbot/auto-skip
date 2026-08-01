@@ -1,20 +1,32 @@
 {
   "manifest_version": 3,
-  "name": "Crunchyroll Auto Skip",
-  "version": "1.6.1",
+  "name": "Auto Skip",
+  "version": "2.1.0",
   "author": "Floppa <floppa@meows.bot>",
-  "description": "Automatically clicks Crunchyroll's Skip Intro / Skip Recap / Skip Credits buttons, and optionally jumps to the next episode.",
-  "permissions": ["storage"],
-  "content_scripts": [
-    {
-      "matches": ["https://*.crunchyroll.com/*"],
-      "all_frames": true,
-      "run_at": "document_idle",
-      "js": ["matchers.js", "content.js"]
-    }
+  "description": "Automatically clicks Skip Intro / Skip Recap / Skip Credits on Crunchyroll, Netflix, Disney+, Prime Video, HBO Max, Hulu and more. On for every service out of the box; turn off the ones you don't want.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://*.crunchyroll.com/*",
+    "https://*.netflix.com/*",
+    "https://*.disneyplus.com/*",
+    "https://*.primevideo.com/*",
+    "https://www.amazon.com/*",
+    "https://www.amazon.co.uk/*",
+    "https://www.amazon.de/*",
+    "https://www.amazon.co.jp/*",
+    "https://*.max.com/*",
+    "https://*.hbomax.com/*",
+    "https://*.hulu.com/*",
+    "https://*.paramountplus.com/*",
+    "https://*.peacocktv.com/*",
+    "https://tv.apple.com/*",
+    "https://*.youtube.com/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
-    "default_title": "Crunchyroll Auto Skip",
+    "default_title": "Auto Skip",
     "default_popup": "settings.html",
     "default_icon": {
       "16": "icons/icon16.png",

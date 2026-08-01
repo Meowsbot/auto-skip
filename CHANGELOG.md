@@ -1,5 +1,78 @@
 # Changelog
 
+## 2.1.0
+
+On everywhere by default, and that now includes the Windows desktop apps.
+
+- **Every service is on at install.** Host access moved from
+  `optional_host_permissions` to `host_permissions`, so it is granted once when
+  you accept the install prompt and there is nothing to configure afterwards.
+  The service switch is now a stored setting (`sites.<id>.enabled`, default
+  true) rather than the presence of a permission.
+- **Works in the Crunchyroll, Netflix, Disney+ and Prime Video desktop apps.**
+  No new code: those Store packages ship no code either. Each is an Edge PWA —
+  `uap10:HostId="PWA"`, a dependency on `Microsoft.MicrosoftEdge.Stable`, and an
+  `--app-id` pointing at the site — so they are Edge windows in the `Default`
+  profile and the existing content script runs in them. Install the extension in
+  Edge and the apps are covered. See the *Desktop apps* section of the README.
+- Switching a service off is now a storage write instead of a permission
+  revoke, so it works from the toolbar popup. The old "Chrome needs a full tab
+  to ask for access" detour is gone, along with `chrome.tabs.getCurrent()`.
+- `background.js` re-syncs registrations on settings changes as well, and
+  injects into already-open tabs on install so an episode you have open starts
+  skipping without a reload. `content.js` re-checks the switch every tick, since
+  unregistering cannot stop a script already running in an open page.
+- Site access withheld from `chrome://extensions` is still handled: the service
+  reads as on but not running, dimmed, with a notice saying where to fix it —
+  rather than a switch that claims to work.
+- "Copy these settings to every service" no longer copies the service switches,
+  only the preferences.
+- `package.ps1` now checks `sites.js` against `host_permissions` in both
+  directions, so the manifest cannot ask for a host no service uses.
+
+## 2.0.0
+
+Renamed from **Crunchyroll Auto Skip** to **Auto Skip**, and extended to nine
+more services: Netflix, Disney+, Prime Video, HBO Max, Hulu, Paramount+,
+Peacock, Apple TV+ and YouTube (skip-ad button only).
+
+- **Pick your services.** Nothing runs until you turn one on. Each service is an
+  optional host permission granted from the settings page, so the extension asks
+  for no site access at install time and holds access only to the services you
+  chose. Turning one off revokes it.
+- **Every service gets the full option set**, stored independently — the same
+  intro/recap/credits/other toggles, next episode, "still watching?", toast,
+  debug logging and delay that Crunchyroll had. "Copy these settings to every
+  service" applies one service's choices to all of them.
+- **One source of truth for what's enabled.** A service is on exactly when its
+  host permission is granted; there is no second flag to drift out of sync.
+  `background.js` re-syncs content script registrations on install, on startup,
+  on every permission change and on every service worker wake, and the settings
+  page reads them back — a granted service that failed to register now says so
+  instead of going quietly inert.
+- **The matcher is unchanged and shared.** Every service labels these controls
+  with the same words, so one keyword engine covers all of them. `sites.js` adds
+  only what no keyword can infer: watch paths, fallback player containers, and
+  narrow curated selectors (`[data-uia="player-skip-intro"]`,
+  `.atvwebplayersdk-skipelement-button`, `.SkipButton`, `.ytp-ad-skip-button`…).
+  Those selectors are trusted exactly like a class name containing "skip".
+- Identity is now also read from `data-uia`, `data-automationid` and
+  `data-automation-id`, which is how Netflix and Hulu name their controls.
+- `preplay` classifies as an intro (Netflix's cold-open skip). "Continue
+  watching?" and "Keep watching?" now count as idle prompts — but only with the
+  question mark, so the *Continue Watching* rail on every home page still can't
+  match. YouTube's paper-dialog is declared as a prompt container since it
+  carries no `role="dialog"`.
+- Per-service skip counts in the settings page; the toast takes the service's
+  colour.
+- `package.ps1` refuses to build if a match pattern in `sites.js` is missing from
+  `optional_host_permissions`, which would leave that service impossible to
+  enable.
+
+Upgrading from 1.x: your Crunchyroll settings are not carried over — the storage
+layout is now per service. Turn Crunchyroll on in the settings page and set it up
+once.
+
 ## 1.6.1
 
 First version confirmed working end to end on a real episode.

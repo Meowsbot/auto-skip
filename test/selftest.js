@@ -1,13 +1,15 @@
-/* Matcher tests. Run with: node test/selftest.js
+/* Matcher and site-registry tests. Run with: node test/selftest.js
  *
  * These guard the false-positive side hardest: a missed skip is a minor
  * annoyance, a wrong click navigates you out of the episode you were watching.
  *
  * Every shipped bug so far has been a real catalogue title that contains a real
- * UI word. The suite MUST keep testing actual Crunchyroll titles — that is the
- * whole bug class.
+ * UI word. The suite MUST keep testing actual catalogue titles — that is the
+ * whole bug class. The matcher is shared by every service, so a title from any
+ * of them is a valid negative case for all of them.
  */
 const M = require('../matchers.js');
+const S = require('../sites.js');
 
 let passed = 0;
 const failures = [];
@@ -206,6 +208,116 @@ check('isConfirmButton("lang-ja")', M.isConfirmButton('lang-ja'), false);
 // are the ones a text rule can and must reject.
 check('isConfirmButton("btn btn--ja")', M.isConfirmButton('btn btn--ja'), false);
 check('isConfirmButton("Non si accettano prenotazioni")', M.isConfirmButton('Non si accettano prenotazioni'), false);
+
+/* ==================== other services' real skip controls ================= */
+
+// Netflix names its controls in data-uia; identityOf() reads that attribute.
+identity('player-skip-intro', 'intro');
+identity('player-skip-recap', 'recap');
+identity('player-skip-credits', 'outro');
+identity('player-skip-preplay', 'intro'); // Netflix's cold-open skip
+// ...but the seamless next-episode control is not a skip control.
+identity('next-episode-seamless-button', null);
+identity('interrupt-autoplay-continue', null);
+
+// Disney+, Prime Video, Hulu, Max, Peacock, Paramount+, Apple TV+, YouTube.
+identity('skip__button', 'other');
+identity('atvwebplayersdk-skipelement-button', 'other');
+identity('SkipButton', 'other');
+identity('player-ux-skip-button', 'other');
+identity('skip-button', 'other');
+identity('skip-intro', 'intro');
+identity('skip-credits', 'outro');
+// YouTube's ad skip: "ad" in the class makes it "other", so it follows the
+// "anything else labelled skip" toggle rather than the intro/recap ones.
+identity('ytp-ad-skip-button ytp-button', 'other');
+identity('ytp-skip-ad-button', 'other');
+identity('ytp-ad-skip-button-modern', 'other');
+// YouTube furniture that must not read as a skip control.
+identity('ytp-next-button ytp-button', null);
+identity('ytp-ad-preview-container', null);
+
+// Labels these services actually render.
+label('Skip Intro', 'intro');
+label('SKIP RECAP', 'recap');
+label('Skip Credits', 'outro');
+label('Skip Ad', 'other');
+label('Skip Ads', 'other');
+label('Skip Ads (5)', 'other');
+// Catalogue titles from the same services, which must not.
+label('The Ad Astra Chronicles', null);
+label('Adventure Time', null);
+label('Skip to My Lou', null);
+label('The Recap Show', null);
+
+/* -------------------------------------------------------- site registry */
+
+const site = (host, expected) =>
+  check(`forHost(${JSON.stringify(host)})`, S.forHost(host)?.id ?? null, expected);
+
+site('www.crunchyroll.com', 'crunchyroll');
+site('beta.crunchyroll.com', 'crunchyroll');
+site('www.netflix.com', 'netflix');
+site('www.disneyplus.com', 'disneyplus');
+site('www.primevideo.com', 'primevideo');
+site('www.amazon.com', 'primevideo');
+site('www.amazon.co.uk', 'primevideo');
+site('play.max.com', 'max');
+site('www.hbomax.com', 'max');
+site('www.hulu.com', 'hulu');
+site('www.paramountplus.com', 'paramountplus');
+site('www.peacocktv.com', 'peacock');
+site('tv.apple.com', 'appletv');
+site('www.youtube.com', 'youtube');
+site('m.youtube.com', 'youtube');
+// Look-alike hosts must not match.
+site('crunchyroll.com.evil.example', null);
+site('notnetflix.com', null);
+site('apple.com', null);
+site('example.com', null);
+
+const watch = (id, path, expected) => {
+  const entry = S.byId(id);
+  check(`${id} watchPath ${JSON.stringify(path)}`, entry.watchPath.test(path), expected);
+};
+
+watch('crunchyroll', '/watch/GRDQ/episode', true);
+watch('crunchyroll', '/es-419/watch/GRDQ/episode', true);
+watch('crunchyroll', '/videos/popular', false);
+watch('netflix', '/watch/80100172', true);
+watch('netflix', '/browse', false);
+watch('youtube', '/watch?v=abc', true);
+watch('youtube', '/feed/subscriptions', false);
+watch('hulu', '/watch/abc-123', true);
+watch('hulu', '/hub/movies', false);
+
+/* Every entry must be complete and internally consistent — a typo'd field here
+ * silently disables a whole service. */
+const ids = new Set();
+for (const entry of S.SITES) {
+  check(`${entry.id} id is unique`, ids.has(entry.id), false);
+  ids.add(entry.id);
+  check(`${entry.id} has matches`, entry.matches.length > 0, true);
+  check(`${entry.id} has a watchPath`, entry.watchPath instanceof RegExp, true);
+  check(`${entry.id} matches its own host pattern`, !!S.forHost(hostOf(entry.matches[0])), true);
+  for (const pattern of entry.matches) {
+    check(`${entry.id} pattern ${pattern} is https`, /^https:\/\/[^/]+\/\*$/.test(pattern), true);
+  }
+  for (const list of ['skipSelectors', 'nextEpisodeSelectors', 'stillWatchingSelectors']) {
+    check(`${entry.id} ${list} is an array`, Array.isArray(entry[list]), true);
+  }
+}
+
+/* A fresh install must work on every service without being configured, and the
+ * switch must be a real setting rather than an implicit one — content.js reads
+ * settings.enabled directly, so a missing default would read as undefined and
+ * only accidentally behave like "on". */
+check('SITE_DEFAULTS has an enabled switch', 'enabled' in S.SITE_DEFAULTS, true);
+check('services default to on', S.SITE_DEFAULTS.enabled, true);
+
+function hostOf(matchPattern) {
+  return matchPattern.replace(/^https:\/\//, '').replace(/\/\*$/, '').replace(/^\*\./, 'www.');
+}
 
 /* ------------------------------------------------------------------ normalize */
 

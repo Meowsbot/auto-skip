@@ -1,7 +1,13 @@
 /* Text matchers, shared by the content script and by test/selftest.js.
  *
- * Loaded as a plain content script (exposes globalThis.__crAutoSkipMatchers)
+ * Loaded as a plain content script (exposes globalThis.__autoSkipMatchers)
  * and as a CommonJS module under node, so the rules can be unit-tested.
+ *
+ * These rules are service-independent on purpose. Every streaming service
+ * labels its skip controls with the same handful of words in the same handful
+ * of languages, so one keyword engine covers all of them; sites.js supplies
+ * only the per-service hooks that no keyword can infer. That also means a rule
+ * loosened for one service is loosened for all of them — see below.
  *
  * DESIGN NOTE — read before changing anything here.
  *
@@ -13,9 +19,10 @@
  *
  * The conclusion is that a skip word in free text proves nothing. So:
  *
- *   - IDENTITY (class / id / data-testid) is authored by Crunchyroll's
- *     engineers to name a control. A skip word there is trustworthy.
- *   - LABEL (aria-label / title / text) can be an anime title. A skip word
+ *   - IDENTITY (class / id / data-testid / data-uia / data-automationid) is
+ *     authored by the service's engineers to name a control. A skip word
+ *     there is trustworthy.
+ *   - LABEL (aria-label / title / text) can be a catalogue title. A skip word
  *     there is trusted only alongside a segment word, with at most one
  *     unrecognised word, in a string short enough to be a button's name.
  *
@@ -28,7 +35,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
-  else root.__crAutoSkipMatchers = api;
+  else root.__autoSkipMatchers = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
@@ -110,6 +117,9 @@
     ['intro', wordStarts([
       'intro', 'opening', 'abertura', 'apertura', 'ouverture', 'vorspann', 'sigla',
       'заставк', 'вступлени', 'المقدمة', 'مقدمة', 'इंट्रो',
+      // Netflix names the cold-open skip "player-skip-preplay". Identifier-only
+      // in practice, and no catalogue title contains it.
+      'preplay',
     ])],
     // Ads: whole-word only, or "ad" would match the start of "Adventure".
     ['other', words(['ad', 'ads', 'anuncio', 'anúncio', 'publicidad', 'werbung', 'pubblicità', 'annonce', 'реклам'])],
@@ -219,7 +229,7 @@
     const text = normalize(label);
     if (NOT_A_SKIP.test(id) || NOT_A_SKIP.test(text)) return null;
 
-    // Trusted path: Crunchyroll named this element a skip control.
+    // Trusted path: the service named this element a skip control.
     if (SKIP_IDENTITY.test(id) || SKIP_WORD.test(id)) {
       return segmentType(id) || segmentType(text) || cjkSegmentType(text) || 'other';
     }
@@ -240,6 +250,10 @@
         'still watching',
         'still there',
         'are you there',
+        // YouTube: "Video paused. Continue watching?". The question mark is
+        // what separates it from the Continue Watching rail on every home page.
+        'continue watching',
+        'keep watching',
         'sigues ah[ií]',
         'ainda est[áa] a[íi]',
         'bist du noch da',

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Crunchyroll Auto Skip</title>
+    <title>Auto Skip</title>
     <link rel="stylesheet" href="settings.css" />
   </head>
   <body>
@@ -11,56 +11,23 @@
         <div class="mark">»</div>
         <div>
           <h1>Auto Skip</h1>
-          <p class="sub">for Crunchyroll</p>
+          <p class="sub" id="sub">Loading…</p>
         </div>
-        <label class="switch master">
+        <label class="switch master" title="Turn everything off">
           <input type="checkbox" id="enabled" />
           <span class="track"></span>
         </label>
       </header>
 
+      <p class="notice" id="notice" hidden></p>
+
       <section class="card" id="body">
-        <h2>Skip</h2>
-        <label class="row">
-          <span>Intros / openings</span>
-          <span class="switch"><input type="checkbox" id="skipIntro" /><span class="track"></span></span>
-        </label>
-        <label class="row">
-          <span>Recaps</span>
-          <span class="switch"><input type="checkbox" id="skipRecap" /><span class="track"></span></span>
-        </label>
-        <label class="row">
-          <span>Credits / outros</span>
-          <span class="switch"><input type="checkbox" id="skipOutro" /><span class="track"></span></span>
-        </label>
-        <label class="row">
-          <span>Anything else labelled "skip"</span>
-          <span class="switch"><input type="checkbox" id="skipOther" /><span class="track"></span></span>
-        </label>
-
-        <h2>Also</h2>
-        <label class="row">
-          <span>Jump straight to the next episode<em>Skips the up-next countdown</em></span>
-          <span class="switch"><input type="checkbox" id="autoNextEpisode" /><span class="track"></span></span>
-        </label>
-        <label class="row">
-          <span>Dismiss "still watching?"</span>
-          <span class="switch"><input type="checkbox" id="dismissStillWatching" /><span class="track"></span></span>
-        </label>
-        <label class="row">
-          <span>Show a little toast when it skips</span>
-          <span class="switch"><input type="checkbox" id="showToast" /><span class="track"></span></span>
-        </label>
-        <label class="row">
-          <span>Debug logging<em>Logs every skip-like button and why it was rejected, to the console</em></span>
-          <span class="switch"><input type="checkbox" id="debug" /><span class="track"></span></span>
-        </label>
-
-        <h2>Timing</h2>
-        <div class="row slider">
-          <span>Wait before skipping <b id="delayLabel">0.00s</b><em>Give yourself a moment to cancel</em></span>
-          <input type="range" id="delayMs" min="0" max="5000" step="250" />
-        </div>
+        <h2>Services</h2>
+        <p class="hint">
+          Turn on the ones you use. Each keeps its own settings — open a service to
+          change them.
+        </p>
+        <div id="services"></div>
       </section>
 
       <footer>
@@ -69,6 +36,59 @@
       </footer>
     </div>
 
+    <!-- Template for one service's options. Cloned per service; ids are
+         rewritten to "<siteId>--<key>" so several copies can coexist. -->
+    <template id="options-template">
+      <div class="opts">
+        <h3>Skip</h3>
+        <label class="row">
+          <span>Intros / openings</span>
+          <span class="switch"><input type="checkbox" data-key="skipIntro" /><span class="track"></span></span>
+        </label>
+        <label class="row">
+          <span>Recaps</span>
+          <span class="switch"><input type="checkbox" data-key="skipRecap" /><span class="track"></span></span>
+        </label>
+        <label class="row">
+          <span>Credits / outros</span>
+          <span class="switch"><input type="checkbox" data-key="skipOutro" /><span class="track"></span></span>
+        </label>
+        <label class="row">
+          <span>Anything else labelled "skip"<em>Includes ads where the service offers a skip button</em></span>
+          <span class="switch"><input type="checkbox" data-key="skipOther" /><span class="track"></span></span>
+        </label>
+
+        <h3>Also</h3>
+        <label class="row">
+          <span>Jump straight to the next episode<em>Skips the up-next countdown</em></span>
+          <span class="switch"><input type="checkbox" data-key="autoNextEpisode" /><span class="track"></span></span>
+        </label>
+        <label class="row">
+          <span>Dismiss "still watching?"</span>
+          <span class="switch"><input type="checkbox" data-key="dismissStillWatching" /><span class="track"></span></span>
+        </label>
+        <label class="row">
+          <span>Show a little toast when it skips</span>
+          <span class="switch"><input type="checkbox" data-key="showToast" /><span class="track"></span></span>
+        </label>
+        <label class="row">
+          <span>Debug logging<em>Logs every skip-like button and why it was rejected, to the console</em></span>
+          <span class="switch"><input type="checkbox" data-key="debug" /><span class="track"></span></span>
+        </label>
+
+        <h3>Timing</h3>
+        <div class="row slider">
+          <span>Wait before skipping <b data-label="delayMs">0.00s</b><em>Give yourself a moment to cancel</em></span>
+          <input type="range" data-key="delayMs" min="0" max="5000" step="250" />
+        </div>
+
+        <div class="row actions">
+          <button type="button" data-action="copy">Copy these settings to every service</button>
+        </div>
+      </div>
+    </template>
+
+    <script src="sites.js"></script>
     <script src="settings.js"></script>
   </body>
 </html>

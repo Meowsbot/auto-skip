@@ -1,38 +1,38 @@
-/* Crunchyroll Auto Skip — content script
+/* Auto Skip — content script
  *
- * Injected into crunchyroll.com and into the Vilos player iframe (all_frames: true).
- * It only acts inside the video player on a watch page, and only clicks controls
- * Crunchyroll itself renders: "Skip Intro", "Skip Recap", "Skip Credits", the
+ * Registered at runtime by background.js, and only for the services the user has
+ * granted. It only acts inside a video player, and only clicks controls the
+ * service itself renders: "Skip Intro", "Skip Recap", "Skip Credits", the
  * up-next card, and the "still watching?" prompt.
+ *
+ * Everything service-specific lives in sites.js. This file is the engine.
  */
 (() => {
   'use strict';
 
-  if (window.__crAutoSkipActive) return;
-  window.__crAutoSkipActive = true;
+  if (window.__autoSkipActive) return;
+  window.__autoSkipActive = true;
 
-  const M = globalThis.__crAutoSkipMatchers;
-  if (!M) {
+  const M = globalThis.__autoSkipMatchers;
+  const S = globalThis.__autoSkipSites;
+  if (!M || !S) {
     // Unconditional: this is a genuine fault, and silence here looks identical
     // to "the extension is running fine but nothing matched".
-    console.error('[auto-skip] matchers.js did not load — extension is inert.');
+    console.error('[auto-skip] matchers.js/sites.js did not load — extension is inert.');
     return;
   }
 
-  // Keep in sync with settings.js
-  const DEFAULTS = Object.freeze({
-    enabled: true,
-    skipIntro: true,
-    skipRecap: true,
-    skipOutro: true,
-    skipOther: true,
-    delayMs: 0,
-    autoNextEpisode: false,
-    dismissStillWatching: true,
-    showToast: true,
-    debug: false,
-  });
+  const SITE = S.forHost(location.hostname);
+  if (!SITE) {
+    // Registered for a host no site entry claims: a manifest/registry mismatch.
+    console.error(`[auto-skip] no site entry for ${location.hostname} — extension is inert.`);
+    return;
+  }
 
+  // Keep in sync with sites.js SITE_DEFAULTS and settings.js.
+  const DEFAULTS = S.SITE_DEFAULTS;
+
+  let enabled = true; // master switch, shared by every service
   let settings = { ...DEFAULTS };
 
   const TICK_MS = 250;
@@ -41,30 +41,41 @@
 
   const IS_SUBFRAME = window !== window.top;
 
-  /* Watch pages, with an optional locale prefix: /watch/, /de/watch/,
-   * /pt-br/watch/, /es-419/watch/ — the last has a numeric subtag. */
-  const WATCH_PATH = /^\/(?:[a-z]{2,3}(?:-[a-z0-9]{2,4})?\/)?watch\//i;
+  const list = (items) => items.filter(Boolean).join(',');
+
+  /* Attributes a service's engineers use to NAME a control. Read as identity,
+   * i.e. trusted — see the design note in matchers.js. Netflix uses data-uia,
+   * Hulu uses data-automationid, most of the rest use data-testid. */
+  const IDENTITY_ATTRS = [
+    'data-testid',
+    'data-test-id',
+    'data-uia',
+    'data-automationid',
+    'data-automation-id',
+  ];
 
   // Elements worth looking at each tick. Cheap enough to run 4x/second.
-  const CANDIDATE_SELECTOR = [
+  const CANDIDATE_SELECTOR = list([
     'button',
     '[role="button"]',
     '[class*="skip" i]',
-    '[data-testid*="skip" i]',
     '[id*="skip" i]',
     '[aria-label*="skip" i]',
     '[title*="skip" i]',
-  ].join(',');
+    ...IDENTITY_ATTRS.map((attr) => `[${attr}*="skip" i]`),
+    ...SITE.skipSelectors,
+  ]);
+
+  /* Curated per-service hooks. Matching one of these is treated exactly like a
+   * class name containing "skip": a human named this control, so it counts.
+   * classifySkip() still decides WHICH segment it is, and the per-segment
+   * toggles still apply. */
+  const SITE_SKIP_SELECTOR = list(SITE.skipSelectors);
 
   /* In the top frame we search only inside the player. A watch page also carries
-   * episode lists and recommendation rails, and an anime title is arbitrary text
-   * — it can say anything, including things that look like UI labels. */
-  const PLAYER_ROOT = [
-    '#velocity-player-package',
-    '[class*="vilos" i]',
-    '[class*="video-player" i]',
-    '[class*="videoPlayer" i]',
-  ].join(',');
+   * episode lists and recommendation rails, and a catalogue title is arbitrary
+   * text — it can say anything, including things that look like UI labels. */
+  const PLAYER_ROOT = list([...SITE.playerRoots, ...S.GENERIC_PLAYER_ROOTS]);
 
   /* Belt and braces for the above: even inside a player root, never treat
    * anything within a rail, carousel or content card as a skip control. */
@@ -82,10 +93,18 @@
 
   const UP_NEXT_CONTAINER =
     '[class*="up-next" i], [class*="upnext" i], [class*="endcard" i], [class*="end-card" i], [class*="next-episode" i]';
+  const SITE_NEXT_SELECTOR = list(SITE.nextEpisodeSelectors);
   const CONTROL_BAR =
     '[class*="control" i], [class*="toolbar" i], [class*="scrubber" i], [class*="header" i], nav';
-  // Strict: a real prompt is a modal dialog, not any element with "overlay" in its class.
-  const STILL_WATCHING_SCOPE = '[role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+  /* Strict: a real prompt is a modal dialog, not any element with "overlay" in
+   * its class. Sites may add their own container when they don't use ARIA. */
+  const STILL_WATCHING_SCOPE = list([
+    '[role="dialog"]',
+    '[role="alertdialog"]',
+    '[aria-modal="true"]',
+    ...SITE.stillWatchingScopes,
+  ]);
+  const SITE_CONFIRM_SELECTOR = list(SITE.stillWatchingSelectors);
   const MAX_PROMPT_CHARS = 200;
 
   const LABELS = {
@@ -98,8 +117,8 @@
   };
 
   /* Keyed by a stable description of the control rather than by node identity:
-   * the SPA re-renders the player constantly, and a fresh node for the same
-   * button used to defeat the repeat block entirely. */
+   * these are all SPAs that re-render the player constantly, and a fresh node
+   * for the same button used to defeat the repeat block entirely. */
   const handled = new Map(); // key -> timestamp
   let lastActionAt = 0;
   let pending = false;
@@ -116,6 +135,7 @@
   }
 
   function query(root, selector) {
+    if (!selector) return [];
     try {
       return root.querySelectorAll(selector);
     } catch (_) {
@@ -123,24 +143,33 @@
     }
   }
 
-  /* Only act on a watch page or inside a frame that is actually playing video.
-   * Anchoring on a <video> element rather than on Crunchyroll's hostname and URL
-   * shape is the point: v1.3.0 required the player iframe to be served from
-   * static.crunchyroll.com with "vilos" in the path, and if that ever stops being
-   * true the extension silently does nothing at all. A frame with a <video> in it
-   * is the player, wherever it is served from.
+  function matches(el, selector) {
+    if (!selector) return false;
+    try {
+      return el.matches(selector);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /* Only act on a watch page, inside a frame that is actually playing video, or
+   * — for services that play inline over a detail page — anywhere a <video>
+   * exists. Anchoring on a <video> element rather than on a hostname and URL
+   * shape is the point: v1.3.0 pinned the player iframe to a specific host and
+   * path, and when that stopped being true the extension silently did nothing.
    *
-   * Re-checked every tick because Crunchyroll is a SPA and the URL changes
+   * Re-checked every tick because these are all SPAs and the URL changes
    * without a reload. */
   function inScope() {
-    if (WATCH_PATH.test(location.pathname)) return true;
-    return IS_SUBFRAME && !!document.querySelector('video');
+    if (SITE.watchPath && SITE.watchPath.test(location.pathname)) return true;
+    if (!document.querySelector('video')) return false;
+    return IS_SUBFRAME || !!SITE.videoIsEnough;
   }
 
   /* Where we're allowed to look. Grown outward from the <video>: start at its
    * parent and keep climbing while the container holds no rail or carousel. That
    * gives the largest region that is unambiguously player, without needing to
-   * know what Crunchyroll calls its wrapper this month. Selector matches are
+   * know what the service calls its wrapper this month. Selector matches are
    * added as a fallback for a skip button rendered outside the video's subtree. */
   function playerRoot() {
     const video = document.querySelector('video');
@@ -172,16 +201,36 @@
 
   function candidates() {
     const found = [];
+    const seen = new Set();
     for (const root of searchRoots()) {
-      for (const el of query(root, CANDIDATE_SELECTOR)) found.push(el);
+      for (const el of query(root, CANDIDATE_SELECTOR)) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        found.push(el);
+      }
+    }
+    /* Curated hooks are searched document-wide as well: some services render the
+     * skip button in a portal outside the player subtree, and these selectors
+     * are specific enough that scoping buys nothing. */
+    for (const el of query(document, SITE_SKIP_SELECTOR)) {
+      if (!seen.has(el)) {
+        seen.add(el);
+        found.push(el);
+      }
     }
     return found;
   }
 
-  // Class / id / data-testid: names Crunchyroll's engineers gave the element.
+  /* Class / id / testid: names the service's engineers gave the element. A
+   * curated site selector is appended as the literal word "skip" so that the
+   * trusted-identity path in classifySkip() picks it up — the selector list in
+   * sites.js is hand-written, which is the same warrant a class name has. */
   function identityOf(el) {
     const cls = typeof el.className === 'string' ? el.className : '';
-    return [el.id, cls, el.getAttribute('data-testid')].filter(Boolean).join(' ');
+    const parts = [el.id, cls];
+    for (const attr of IDENTITY_ATTRS) parts.push(el.getAttribute(attr));
+    if (matches(el, SITE_SKIP_SELECTOR)) parts.push('skip');
+    return parts.filter(Boolean).join(' ');
   }
 
   // Text nodes belonging to this element directly, excluding descendants.
@@ -262,22 +311,32 @@
       if (!type || !wants(type)) continue;
       if (handled.has(keyOf(el, type))) continue;
       /* The rail/card exclusion applies only OUTSIDE the video-anchored player
-       * container. Crunchyroll renders the player inline in the watch page — there
-       * is no player iframe — so this check was being applied to the player's own
-       * UI, where a single class containing "card" or "rail" would silently block
-       * every skip. Inside the container that holds the <video>, everything is
-       * player chrome by definition. */
-      if (!(anchored && anchored.contains(el)) && el.closest(NEVER_SKIP_WITHIN)) continue;
+       * container. Several of these services render the player inline in the
+       * page — there is no player iframe — so this check was being applied to
+       * the player's own UI, where a single class containing "card" or "rail"
+       * would silently block every skip. Inside the container that holds the
+       * <video>, everything is player chrome by definition. A curated site
+       * selector is exempt outright. */
+      if (
+        !(anchored && anchored.contains(el)) &&
+        !matches(el, SITE_SKIP_SELECTOR) &&
+        el.closest(NEVER_SKIP_WITHIN)
+      ) continue;
       // isLinked() scans the subtree, so check it last, after the cheap filters.
       if (isVisible(el) && !isLinked(el)) return { el, type };
     }
     return null;
   }
 
-  /* The up-next card at the end of an episode. Requires an actual up-next
-   * container and rejects anything in the control bar, so it can't hit the
-   * next-episode control that sits there for the whole episode. */
+  /* The up-next card at the end of an episode. A curated selector is enough on
+   * its own; otherwise it requires an actual up-next container and rejects
+   * anything in the control bar, so it can't hit the next-episode control that
+   * sits there for the whole episode. */
   function findNextEpisode() {
+    for (const el of query(document, SITE_NEXT_SELECTOR)) {
+      if (handled.has(keyOf(el, 'next'))) continue;
+      if (isVisible(el)) return el;
+    }
     for (const el of candidates()) {
       if (handled.has(keyOf(el, 'next'))) continue;
       if (!M.isNextEpisode(labelOf(el)) && !M.isNextEpisode(identityOf(el))) continue;
@@ -290,8 +349,15 @@
 
   /* The idle prompt: a modal dialog that asks the question, then the confirm
    * button inside that same dialog. The body length cap keeps a dialog that
-   * merely quotes a synopsis from qualifying. */
+   * merely quotes a synopsis from qualifying.
+   *
+   * A curated confirm selector skips the text test entirely — it names the
+   * control, which is stronger evidence than any wording rule. */
   function findStillWatching() {
+    for (const el of query(document, SITE_CONFIRM_SELECTOR)) {
+      if (handled.has(keyOf(el, 'stillWatching'))) continue;
+      if (isVisible(el)) return el;
+    }
     for (const scope of query(document, STILL_WATCHING_SCOPE)) {
       const body = (scope.textContent || '').trim();
       if (body.length > MAX_PROMPT_CHARS) continue;
@@ -357,11 +423,17 @@
     return true;
   }
 
+  /* Counted per service as well as in total, so the settings page can show which
+   * services are actually doing anything. */
   function bumpStat(key) {
     safe(() => {
       chrome.storage.local.get({ stats: {} }, ({ stats }) => {
         stats[key] = (stats[key] || 0) + 1;
         stats.total = (stats.total || 0) + 1;
+        stats.sites = stats.sites || {};
+        const site = (stats.sites[SITE.id] = stats.sites[SITE.id] || {});
+        site[key] = (site[key] || 0) + 1;
+        site.total = (site.total || 0) + 1;
         safe(() => chrome.storage.local.set({ stats }));
       });
     });
@@ -403,7 +475,10 @@
   }
 
   function tick() {
-    if (!settings.enabled || pending) return;
+    // settings.enabled is this service's own switch. background.js unregisters
+    // the script when it goes off, but that is asynchronous and cannot touch a
+    // page where the script is already running — so it is enforced here too.
+    if (!enabled || settings.enabled === false || pending) return;
 
     const now = Date.now();
     if (!inScope()) {
@@ -437,21 +512,31 @@
 
   /* ------------------------------------------------------------------- debug */
 
-  /* Turned on from the popup. Prints, at most every 2s, every skip-looking
-   * element in scope and exactly which gate rejected it — so a report of "it
-   * stopped skipping" can be settled by looking rather than by guessing. */
-  const DEBUG_SELECTOR =
-    '[class*="skip" i], [data-testid*="skip" i], [id*="skip" i], [aria-label*="skip" i], [title*="skip" i], button, [role="button"]';
+  /* Turned on per service from the popup. Prints, at most every 2s, every
+   * skip-looking element in scope and exactly which gate rejected it — so a
+   * report of "it stopped skipping" can be settled by looking rather than by
+   * guessing. */
+  const DEBUG_SELECTOR = list([
+    '[class*="skip" i]',
+    '[id*="skip" i]',
+    '[aria-label*="skip" i]',
+    '[title*="skip" i]',
+    ...IDENTITY_ATTRS.map((attr) => `[${attr}*="skip" i]`),
+    ...SITE.skipSelectors,
+    'button',
+    '[role="button"]',
+  ]);
   let lastReportAt = 0;
 
   function report(now, why) {
     if (now - lastReportAt < 2000) return;
     lastReportAt = now;
 
-    const where = (IS_SUBFRAME ? 'subframe ' : 'top ') + location.pathname;
+    const where = `${SITE.id} ${IS_SUBFRAME ? 'subframe' : 'top'} ${location.pathname}`;
     if (why === 'out of scope') {
+      const onWatchPath = !!(SITE.watchPath && SITE.watchPath.test(location.pathname));
       console.log(
-        `[auto-skip] ${why}: ${where} — watchPath=${WATCH_PATH.test(location.pathname)} video=${!!document.querySelector('video')}`
+        `[auto-skip] ${why}: ${where} — watchPath=${onWatchPath} video=${!!document.querySelector('video')} videoIsEnough=${!!SITE.videoIsEnough}`
       );
       return;
     }
@@ -474,7 +559,9 @@
             ? 'classifySkip'
             : !wants(type)
               ? 'setting off'
-              : !(anchored && anchored.contains(el)) && el.closest(NEVER_SKIP_WITHIN)
+              : !(anchored && anchored.contains(el)) &&
+                  !matches(el, SITE_SKIP_SELECTOR) &&
+                  el.closest(NEVER_SKIP_WITHIN)
                 ? 'inside rail/card'
                 : !isVisible(el)
                   ? 'not visible'
@@ -494,7 +581,7 @@
 
   /* ------------------------------------------------------------------- toast */
 
-  const TOAST_ID = 'cr-auto-skip-toast';
+  const TOAST_ID = 'auto-skip-toast';
 
   function toast(message) {
     if (!settings.showToast) return;
@@ -517,7 +604,7 @@
           'font:600 13px/1.2 system-ui,-apple-system,Segoe UI,sans-serif',
           'letter-spacing:.2px',
           'box-shadow:0 2px 10px rgba(0,0,0,.4)',
-          'border-left:3px solid #f47521',
+          `border-left:3px solid ${SITE.accent}`,
           'opacity:0',
           'transition:opacity .25s ease',
         ].join(';');
@@ -536,17 +623,21 @@
 
   /* ------------------------------------------------------------------- start */
 
+  function applyStored(stored) {
+    enabled = stored.enabled !== false;
+    settings = { ...DEFAULTS, ...((stored.sites || {})[SITE.id] || {}) };
+  }
+
   safe(() => {
-    chrome.storage.sync.get(DEFAULTS, (stored) => {
-      settings = { ...DEFAULTS, ...stored };
-    });
+    chrome.storage.sync.get({ enabled: true, sites: {} }, applyStored);
   });
 
   safe(() => {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'sync') return;
-      for (const [key, { newValue }] of Object.entries(changes)) {
-        if (key in DEFAULTS) settings[key] = newValue;
+      if ('enabled' in changes) enabled = changes.enabled.newValue !== false;
+      if ('sites' in changes) {
+        settings = { ...DEFAULTS, ...((changes.sites.newValue || {})[SITE.id] || {}) };
       }
     });
   });
