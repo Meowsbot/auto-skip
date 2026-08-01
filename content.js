@@ -621,6 +621,182 @@
     }
   }
 
+  /* --------------------------------------------------------------- remote */
+
+  /* Carries out the commands the phone sends, and reports what is playing.
+   *
+   * All of this is inert unless the user turned remote control on — the worker
+   * never connects, so no message ever arrives here. The listener is registered
+   * unconditionally anyway, because registering it later would mean the first
+   * command after switching remote on would be dropped.
+   *
+   * The transport commands act on the <video> directly rather than on the
+   * player's own controls. Those controls are what the skip matcher spends all
+   * its effort identifying safely; driving them for play/pause would inherit
+   * every one of those risks for no gain, and `video.play()` cannot click the
+   * wrong thing. */
+
+  const videoEl = () => document.querySelector('video');
+
+  function control(command) {
+    const video = videoEl();
+    switch (command.type) {
+      case 'play':
+        if (!video) return false;
+        video.play().catch(() => {});
+        return true;
+      case 'pause':
+        if (!video) return false;
+        video.pause();
+        return true;
+      case 'playPause':
+        if (!video) return false;
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+        return true;
+      case 'seek':
+        if (!video) return false;
+        video.currentTime = Math.max(0, Math.min(video.duration || Infinity, video.currentTime + command.by));
+        return true;
+      case 'volume':
+        if (!video) return false;
+        video.volume = command.level;
+        return true;
+      case 'mute':
+        if (!video) return false;
+        video.muted = command.on;
+        return true;
+      /* The manual versions of what the loop does on its own. They bypass the
+       * configured delay — you already decided, by pressing the button. */
+      case 'skip': {
+        const found = findSkipButton();
+        if (!found) return false;
+        act(found.el, found.type);
+        return true;
+      }
+      case 'nextEpisode': {
+        const el = findNextEpisode();
+        if (!el) return false;
+        act(el, 'next');
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /* What the phone shows as "now playing". `document.title` is the only title
+   * every service agrees on; the page's own heading is named differently on
+   * each one and is not worth ten selectors that rot. */
+  function playbackState() {
+    const video = videoEl();
+    return {
+      service: SITE.id,
+      title: (document.title || '').replace(/\s*[|-]\s*(Crunchyroll|Netflix|Disney\+|Prime Video).*$/i, '').trim(),
+      url: location.href,
+      playing: !!video && !video.paused && !video.ended,
+      position: video ? Math.round(video.currentTime) : 0,
+      duration: video && Number.isFinite(video.duration) ? Math.round(video.duration) : 0,
+    };
+  }
+
+  /* Continue-watching, read out of the page the user is already logged into.
+   * No credentials leave the machine and no private API is called — this is
+   * the same rail they are looking at.
+   *
+   * Deliberately generic: anything that links to a watch URL on this service
+   * and carries a title. It will miss things and occasionally pick up a
+   * recommendation rail, which is the right failure for a list you glance at.
+   * A wrong entry here costs a tap; the strictness budget belongs to clicking,
+   * where a wrong guess throws you out of your episode. */
+  function harvest() {
+    if (!SITE.watchPath) return [];
+    const seen = new Set();
+    const items = [];
+    for (const link of document.querySelectorAll('a[href]')) {
+      let url;
+      try {
+        url = new URL(link.href, location.href);
+      } catch (_) {
+        continue;
+      }
+      if (url.origin !== location.origin) continue;
+      if (!SITE.watchPath.test(url.pathname)) continue;
+      if (seen.has(url.href)) continue;
+
+      const title = (link.getAttribute('aria-label') || link.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!title || title.length > 200) continue;
+
+      const image = link.querySelector('img');
+      seen.add(url.href);
+      items.push({
+        title,
+        url: url.href,
+        service: SITE.id,
+        poster: image?.currentSrc || image?.src || null,
+      });
+      if (items.length >= 60) break;
+    }
+    return items;
+  }
+
+  /* safe() swallows the return value, and these need it — a command that could
+   * not be carried out has to say so, or the phone reports success for a tap
+   * that did nothing. */
+  function attempt(fn, fallback) {
+    try {
+      return fn();
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  safe(() => {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type === 'auto-skip:control') {
+        sendResponse({ ok: attempt(() => control(message.command), false) === true });
+        return false;
+      }
+      if (message?.type === 'auto-skip:harvest') {
+        const continueWatching = attempt(harvest, []);
+        const state = playbackState();
+        chrome.runtime.sendMessage({
+          type: 'auto-skip:state',
+          playing: state.playing,
+          state: { ...state, continueWatching },
+        });
+        sendResponse({ ok: true, found: continueWatching.length });
+        return false;
+      }
+      return false;
+    });
+  });
+
+  /* Report on the events that change what the phone should show, plus a slow
+   * tick so a seek or a scrub does not leave it stale. Rate-limited, because
+   * timeupdate fires four times a second and this crosses a process boundary. */
+  let lastSent = 0;
+  function reportState(force = false) {
+    const now = Date.now();
+    if (!force && now - lastSent < 5000) return;
+    lastSent = now;
+    safe(() => {
+      const state = playbackState();
+      chrome.runtime.sendMessage({ type: 'auto-skip:state', playing: state.playing, state });
+    });
+  }
+
+  safe(() => {
+    for (const event of ['play', 'pause', 'ended', 'loadedmetadata']) {
+      document.addEventListener(event, () => reportState(true), true);
+    }
+    setInterval(() => {
+      if (videoEl()) reportState();
+    }, 5000);
+  });
+
   /* ------------------------------------------------------------------- start */
 
   function applyStored(stored) {

@@ -319,6 +319,75 @@ function hostOf(matchPattern) {
   return matchPattern.replace(/^https:\/\//, '').replace(/\/\*$/, '').replace(/^\*\./, 'www.');
 }
 
+/* --------------------------------------------------------------------- remote */
+
+/* The frame parser is the piece most likely to fail only in production: SSE
+ * frames arrive split across chunk boundaries, and it works fine on a fast
+ * loopback connection right up until it doesn't. */
+const RM = require('../remote.js');
+
+{
+  const push = RM.createFrameParser();
+  check('a retry preamble yields no event', push('retry: 2000\n\n').length, 0);
+  check('a comment yields no event', push(': ping\n\n').length, 0);
+
+  const hello = push('event: hello\ndata: {"id":1}\n\n');
+  check('hello parses', hello.length, 1);
+  check('hello has the event name', hello[0].event, 'hello');
+  check('hello has the data', hello[0].data.id, 1);
+
+  /* Split across three reads, mid-field and mid-JSON. */
+  check('a frame split across chunks yields nothing yet', push('event: comm').length, 0);
+  check('still nothing mid-json', push('and\ndata: {"type":"pl').length, 0);
+  const split = push('ay"}\n\n');
+  check('the split frame completes', split.length, 1);
+  check('the split frame is intact', split[0].data.type, 'play');
+
+  const two = push('event: command\ndata: {"type":"pause"}\n\nevent: command\ndata: {"type":"skip"}\n\n');
+  check('two frames in one chunk both parse', two.length, 2);
+  check('second of two is right', two[1].data.type, 'skip');
+
+  check('a frame with unreadable json is dropped', push('event: command\ndata: {oops\n\n').length, 0);
+  check('a data-only frame is not an event', push('data: {"a":1}\n\n').length, 0);
+}
+
+check('normalizeServer adds a scheme', RM.normalizeServer('192.168.1.20:8787'), 'http://192.168.1.20:8787');
+check('normalizeServer keeps https', RM.normalizeServer('https://pc.local:8787'), 'https://pc.local:8787');
+check('normalizeServer drops a path', RM.normalizeServer('http://pc.local:8787/api/'), 'http://pc.local:8787');
+check('normalizeServer trims', RM.normalizeServer('  pc.local:8787  '), 'http://pc.local:8787');
+check('normalizeServer rejects empty', RM.normalizeServer(''), null);
+check('normalizeServer rejects a non-http scheme', RM.normalizeServer('ftp://pc.local'), null);
+check('normalizeServer rejects nonsense', RM.normalizeServer('::::'), null);
+/* This value is handed to chrome.permissions.request(), so a scheme that is
+ * not http(s) must never survive it. */
+check('normalizeServer rejects javascript:', RM.normalizeServer('javascript:alert(1)'), null);
+check('normalizeServer rejects mailto:', RM.normalizeServer('mailto:a@b.c'), null);
+check('normalizeServer rejects file:', RM.normalizeServer('file:///C:/Windows'), null);
+check('normalizeServer keeps an ipv4 host', RM.normalizeServer('10.0.0.5:8787'), 'http://10.0.0.5:8787');
+
+/* Tab preference. On Windows these services run as Edge PWAs, so an app window
+ * is the one the user means — that ordering is the whole point. */
+{
+  const tabs = [
+    { id: 1, windowType: 'normal', active: true, lastAccessed: 100 },
+    { id: 2, windowType: 'app', active: false, lastAccessed: 50 },
+    { id: 3, windowType: 'normal', active: false, lastAccessed: 200 },
+  ];
+  check('an app window beats an active tab', RM.pickPlayerTab(tabs).id, 2);
+  check('a playing tab beats an app window', RM.pickPlayerTab(tabs, { playingTabIds: [3] }).id, 3);
+  check('an explicit preference wins outright', RM.pickPlayerTab(tabs, { preferTabId: 1 }).id, 1);
+  check('no tabs yields null', RM.pickPlayerTab([]), null);
+  check('tabs with no id are ignored', RM.pickPlayerTab([{ windowType: 'app' }]), null);
+  check(
+    'among equals the most recent wins',
+    RM.pickPlayerTab([
+      { id: 7, windowType: 'normal', lastAccessed: 10 },
+      { id: 8, windowType: 'normal', lastAccessed: 99 },
+    ]).id,
+    8
+  );
+}
+
 /* ------------------------------------------------------------------ normalize */
 
 check('normalize("skipIntroText")', M.normalize('skipIntroText'), 'skip Intro Text');

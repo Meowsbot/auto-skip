@@ -194,6 +194,71 @@ async function verifyRegistrations() {
   }
 }
 
+/* ---------------------------------------------------------------- remote */
+
+/* Pairing. The server address is arbitrary — it is a machine on the user's
+ * LAN — so its host permission cannot be declared at build time. It is
+ * requested here, for that one origin, from the click that saves it. The
+ * manifest's broad optional pattern is what makes that request legal; the
+ * extension never asks for more than the single origin typed in this box.
+ *
+ * The token is stored in chrome.storage.sync like every other setting. That
+ * means it syncs to the user's other browsers, which is the behaviour they
+ * expect from a paired device, and it is no more exposed than any other
+ * extension setting on a machine someone already controls. */
+
+const remoteState = () => ({
+  enabled: !!state.remote?.enabled,
+  server: state.remote?.server || '',
+  token: state.remote?.token || '',
+});
+
+function renderRemote() {
+  const remote = remoteState();
+  $('remote-enabled').checked = remote.enabled;
+  $('remote-server').value = remote.server;
+  $('remote-token').value = remote.token;
+  $('remote-status').textContent = remote.enabled ? 'On' : 'Off';
+  $('remote-card').classList.toggle('active', remote.enabled);
+}
+
+function saveRemote(patch) {
+  state.remote = { ...remoteState(), ...patch };
+  chrome.storage.sync.set({ remote: state.remote });
+  renderRemote();
+}
+
+async function connectRemote() {
+  const typed = $('remote-server').value;
+  const server = globalThis.__autoSkipRemote.normalizeServer(typed);
+  const token = $('remote-token').value.trim();
+
+  if (!server) return flash('That server address is not a valid http address.', true);
+  if (!token) return flash('Paste the token the server printed on startup.', true);
+
+  /* Ask for access to that one origin. Must come from this click — a
+   * permission request outside a user gesture is refused. */
+  let allowed = false;
+  try {
+    allowed = await chrome.permissions.request({ origins: [`${server}/*`] });
+  } catch (error) {
+    return flash(`Could not ask for access to ${server}: ${error.message}`, true);
+  }
+  if (!allowed) return flash(`Auto Skip needs access to ${server} to reach it.`, true);
+
+  $('remote-status').textContent = 'Checking…';
+  try {
+    const response = await fetch(`${server}/health`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`server said ${response.status}`);
+  } catch (error) {
+    $('remote-status').textContent = 'Off';
+    return flash(`No server at ${server} — is it running? (${error.message})`, true);
+  }
+
+  saveRemote({ enabled: true, server, token });
+  flash(`Connected to ${server}.`);
+}
+
 /* ---------------------------------------------------------------- notice */
 
 let flashTimer;
@@ -241,12 +306,28 @@ async function init() {
   const list = $('services');
   for (const site of SITES) list.append(buildService(site));
 
-  state = await chrome.storage.sync.get({ enabled: true, sites: {} });
+  state = await chrome.storage.sync.get({ enabled: true, sites: {}, remote: {} });
   $('enabled').checked = state.enabled !== false;
 
   await readGranted();
   renderOptions();
   renderServices();
+  renderRemote();
+
+  $('remote-save').addEventListener('click', () => {
+    connectRemote().catch((error) => flash(String(error.message || error), true));
+  });
+  $('remote-enabled').addEventListener('change', (event) => {
+    if (event.target.checked) {
+      // Turning it on means pairing; do the whole check rather than trusting
+      // a stored address that may never have worked.
+      event.target.checked = false;
+      connectRemote().catch((error) => flash(String(error.message || error), true));
+    } else {
+      saveRemote({ enabled: false });
+      flash('Remote control off. The extension makes no network requests again.');
+    }
+  });
 
   chrome.storage.local.get({ stats: {} }, ({ stats }) => renderStats(stats));
   verifyRegistrations();
@@ -280,6 +361,10 @@ async function init() {
       state.enabled = changes.enabled.newValue !== false;
       $('enabled').checked = state.enabled;
       $('body').classList.toggle('off', !state.enabled);
+    }
+    if ('remote' in changes) {
+      state.remote = changes.remote.newValue || {};
+      renderRemote();
     }
   });
 }

@@ -46,6 +46,8 @@ $files = @(
   'sites.js',
   'matchers.js',
   'content.js',
+  'remote.js',
+  'remote-worker.js',
   'settings.html',
   'settings.css',
   'settings.js',

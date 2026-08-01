@@ -325,3 +325,46 @@ button:hover {
   color: var(--text);
   border-color: var(--accent);
 }
+
+/* ------------------------------------------------------------------ remote */
+
+/* Pairing fields. Laid out as label-above-input rather than as a .row, because
+   an address and a token are typed, not toggled, and the switch rows put their
+   control hard right where a text box would be unreadably narrow. */
+.field {
+  display: block;
+}
+
+.field label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.field input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#remote-card .status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#remote-card.active .status {
+  color: var(--accent);
+}

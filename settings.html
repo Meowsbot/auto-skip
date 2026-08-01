@@ -30,6 +30,35 @@
         <div id="services"></div>
       </section>
 
+      <section class="card" id="remote-card">
+        <h2>Remote control</h2>
+        <p class="hint">
+          Let a phone on your network pick what plays here. Off unless you turn
+          it on — Auto Skip makes no network requests otherwise. Run the server
+          on this PC first; it prints the address and token.
+        </p>
+
+        <label class="row">
+          <span>Enable remote control<em>Connects to the one server you name below, and nothing else</em></span>
+          <span class="switch"><input type="checkbox" id="remote-enabled" /><span class="track"></span></span>
+        </label>
+
+        <div class="row field">
+          <label for="remote-server">Server</label>
+          <input type="text" id="remote-server" placeholder="192.168.1.20:8787" spellcheck="false" />
+        </div>
+
+        <div class="row field">
+          <label for="remote-token">Token</label>
+          <input type="password" id="remote-token" placeholder="paste the token the server printed" spellcheck="false" />
+        </div>
+
+        <div class="row actions">
+          <button type="button" id="remote-save">Connect</button>
+          <span class="status" id="remote-status">Off</span>
+        </div>
+      </section>
+
       <footer>
         <span id="stats">No skips yet</span>
         <button id="reset" type="button">Reset</button>
@@ -89,6 +118,7 @@
     </template>
 
     <script src="sites.js"></script>
+    <script src="remote.js"></script>
     <script src="settings.js"></script>
   </body>
 </html>

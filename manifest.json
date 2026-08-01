@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Auto Skip",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": "Floppa <floppa@meows.bot>",
   "description": "Automatically clicks Skip Intro / Skip Recap / Skip Credits on Crunchyroll, Netflix, Disney+, Prime Video, HBO Max, Hulu and more. On for every service out of the box; turn off the ones you don't want.",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "alarms"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
   "host_permissions": [
     "https://*.crunchyroll.com/*",
     "https://*.netflix.com/*",

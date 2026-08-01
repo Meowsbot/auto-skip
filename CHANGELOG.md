@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.2.0
+
+Remote control, off by default. A phone on your network can pick what plays on
+this PC; the server and phone apps are in
+[auto-skip-remote](https://github.com/Meowsbot/auto-skip-remote).
+
+- **`remote.js` / `remote-worker.js`.** The worker holds an SSE stream from the
+  local server with a streaming `fetch()` — a service worker has no
+  `EventSource`, and holding one in an offscreen document would mean declaring
+  a `reason` describing a DOM capability this does not use. Stream chunks count
+  as worker activity, which is why the server heartbeat is 25s against the 30s
+  eviction timer; an `alarms` watchdog reconnects if the stream dies anyway.
+- **Commands:** open, fullscreen, play/pause, seek, skip now, next episode,
+  volume, mute, refresh. Transport acts on the `<video>` directly rather than
+  on the player's controls — `video.play()` cannot click the wrong thing.
+- **Fullscreen is window-level** (`chrome.windows.update`). `requestFullscreen()`
+  from a content script has no transient activation and is refused, and a
+  synthetic click on the player's control is `isTrusted: false`.
+- **Continue-watching is harvested from the logged-in page** and reported to the
+  server. No credentials leave the machine, no private API is called.
+- **The privacy claim changed and the README says so.** With remote control off
+  the extension still makes no network requests; with it on it talks to the one
+  origin you named. Its host permission is optional and requested for that
+  single origin from the click that saves it.
+- Two bugs found by the new tests before shipping: `normalizeServer` turned
+  `ftp://pc.local` into the origin `http://ftp`, and the fix for that then read
+  `pc.local:8787` as a scheme. A scheme is now only a scheme when followed by
+  `//`; a colon before digits is a port.
+
 ## 2.1.0
 
 On everywhere by default, and that now includes the Windows desktop apps.

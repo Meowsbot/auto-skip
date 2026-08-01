@@ -21,7 +21,7 @@
  * saving a few milliseconds. The failure this guards against is the extension
  * going quietly inert, which is indistinguishable from it being broken.
  */
-importScripts('sites.js');
+importScripts('sites.js', 'remote.js');
 
 const { SITES, SITE_DEFAULTS } = self.__autoSkipSites;
 
@@ -193,3 +193,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 /* Runs on every worker wake, including the ones triggered by the listeners
  * above. Cheap, and the only thing that repairs a lost registration. */
 sync();
+
+/* Remote control. Loaded last, and inert unless the user turned it on — it
+ * registers its own listeners and connects to nothing until then. */
+importScripts('remote-worker.js');

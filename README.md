@@ -99,12 +99,58 @@ is dimmed in the settings page and says so, rather than pretending to run.
 
 ## Privacy
 
-The extension collects nothing and sends nothing anywhere. It has two
-permissions, `storage` (settings and a local skip counter) and `scripting`
-(registering the content script for the services you have on), plus host access
-to the services in the table above and nothing else — checked at build time in
-both directions, so it cannot ask for a host no service uses. No network
-requests, no analytics, no remote code.
+The extension collects nothing and sends nothing anywhere. It has three
+permissions — `storage` (settings and a local skip counter), `scripting`
+(registering the content script for the services you have on) and `alarms`
+(the remote-control watchdog, below) — plus host access to the services in the
+table above and nothing else, checked at build time in both directions so it
+cannot ask for a host no service uses. No analytics, no remote code.
+
+**Remote control is the one exception, and it is off.** With it off, the
+extension makes no network requests at all. Turning it on is you naming one
+server on your own network; the extension then connects to that origin and no
+other. Its host permission is optional and requested for that single origin
+when you paste the address — the broad `http://*/*` in
+`optional_host_permissions` is what makes requesting an arbitrary LAN address
+legal, and the extension never asks for more than the one you typed. See
+[Remote control](#remote-control).
+
+## Remote control
+
+Off by default. Turn it on and a phone on your network can pick what plays
+here: open a title, fullscreen it, play/pause, seek, skip now, next episode.
+The server and the phone apps live in
+[auto-skip-remote](https://github.com/Meowsbot/auto-skip-remote); this is the
+browser half.
+
+Settings page → **Remote control** → paste the address and token the server
+printed → **Connect**. It checks the server responds before saving, and asks
+for access to that one origin.
+
+How it works, and why it is built this way:
+
+- **The worker consumes the SSE stream with `fetch()`**, not `EventSource` —
+  a service worker has none — and not from an offscreen document, because
+  every offscreen `reason` describes a DOM capability this does not need and
+  declaring one it is not using would be a lie in the manifest.
+- **An MV3 worker is evicted after 30s idle, and stream chunks count as
+  activity.** That is why the server's heartbeat is 25s. The `alarms` watchdog
+  reconnects once a minute if the stream died anyway.
+- **Fullscreen is `chrome.windows.update({state: 'fullscreen'})`.** A content
+  script calling `requestFullscreen()` has no transient user activation and is
+  refused; a synthetic click on the player's own control is `isTrusted: false`
+  and ignored. On a PWA window the window state is what you meant regardless.
+- **Transport acts on the `<video>` directly**, not on the player's controls.
+  Identifying those safely is what the whole matcher exists for; `video.play()`
+  cannot click the wrong thing.
+- **Continue-watching is read out of the page you are already logged into.** No
+  credentials leave the machine and no private API is called. It is deliberately
+  loose — a wrong entry costs you a tap, so the strictness budget stays with
+  clicking, where a wrong guess throws you out of your episode.
+
+The server allows `open` only for https URLs on the ten services above, so a
+stolen token cannot use the remote as a "make my logged-in browser visit this"
+gadget.
 
 ## Settings
 
